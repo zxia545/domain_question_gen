@@ -5,8 +5,6 @@ from utils import read_jsonl, write_jsonl, start_vllm_server, stop_vllm_server, 
 import logging
 import time
 import json
-import openai
-import sys
 import re
 
 # Configure logger
@@ -21,8 +19,8 @@ logger.info("Starting the script...")
 
 def transform_to_readable_text(data_obj):
     """
-    Convert a single JSON object into a readable text block for GPT-4 prompt usage.
-    The data_obj is expected to contain keys like:
+    Convert a single JSON object into a readable text block for prompt usage.
+    Expected keys include:
       - "book_name"
       - "part_title"
       - "part_subtitle"
@@ -30,7 +28,6 @@ def transform_to_readable_text(data_obj):
       - "chapter_subtitle"
       - "section_number"
       - "section_title"
-      - "bibliographic"
       - "sidenote"
       - "content" (a list of paragraphs)
     """
@@ -41,7 +38,6 @@ def transform_to_readable_text(data_obj):
     chapter_subtitle = data_obj.get("chapter_subtitle", "")
     section_number   = data_obj.get("section_number", "")
     section_title    = data_obj.get("section_title", "")
-    # bibliographic    = data_obj.get("bibliographic", "")
     sidenote         = data_obj.get("sidenote", "")
     content_list     = data_obj.get("content", [])
 
@@ -53,110 +49,118 @@ def transform_to_readable_text(data_obj):
     text_block.append(f"Chapter Subtitle: {chapter_subtitle}")
     text_block.append(f"Section Number: {section_number}")
     text_block.append(f"Section Title: {section_title}")
-    # text_block.append(f"Bibliographic: {bibliographic}")
     text_block.append(f"Sidenote: {sidenote}")
     text_block.append("\nContent:\n")
 
     for paragraph in content_list:
         text_block.append(paragraph)
-        text_block.append("")  # blank line between paragraphs
-    
+        text_block.append("")  # Blank line between paragraphs
+
     combine_txt = "\n".join(text_block)
     word_count = len(combine_txt.split())
     logger.info(f"Word count of text block: {word_count}")
     return combine_txt
 
-def create_prompt(raw_text, question_type, question_count):
+def create_single_choice_prompt(raw_text, question_count):
     """
-    Build the GPT-4 prompt based on the question type and question count.
-    
-    For each question, the model is asked to provide:
-      1. The Question
-      2. The Correct Answer
-      3. A Detailed Explanation (self-contained without referring back to the text)
-    
-    **Output Requirements:**
-      - The output must be valid JSON.
-      - The JSON should be an array of objects.
-      - Each object must contain exactly these three keys: "question", "answer", and "explanation".
-      - Do not include any extra commentary or text outside the JSON.
-    
-    Raw Text:
-    {raw_text}
+    Generate a prompt template for single-choice questions.
+    The example output uses generic fake values.
     """
-    type_mapping = {
-        "single-choice": "Single Choice (SC)",
-        "multiple-choice": "Multiple Choice (MC)",
-        "fill-in-the-blank": "Fill in the Blank (FB)",
-        "judgment": "Judgment (True/False) (J)",
-        "short-answer": "Short Answer (SA)"
-    }
-    question_type_name = type_mapping.get(question_type, question_type)
-    
-    prompt = f'''
-You have the following raw text.
-Please analyze it carefully and generate {question_count} questions of type "{question_type_name}."
+    prompt = f"""
+You are provided with the following raw text:
+------------------------------
+{raw_text}
+------------------------------
+Please analyze the text carefully and generate {question_count} single-choice questions.
+For each question, output the following keys in valid JSON:
+- "question": The question text.
+- "choices": The options in the format "A: option, B: option, C: option, D: option". There must be exactly four choices.
+- "answer": A single letter representing the correct option (e.g., "x1").
+- "explanation": A detailed and self-contained explanation that does not refer back to the provided text.
 
-For each question, provide:
-1. The Question
-2. The Correct Answer
-3. A Detailed Explanation of this Answer.
-The explanation should not refer to the raw text or mention "the text says" or "based on the given text".
-It should be a self-contained explanation that provides general knowledge or reasoning for why the answer is correct.
-
-**Output Requirements:**
-- The output must be valid JSON.
-- The JSON should be an array of objects.
-- Each object must contain exactly these three keys: "question", "answer", and "explanation".
-- Do not include any extra commentary or text outside the JSON.
-- Example output format:
-```
+Example:
 [
     {{
         "question": "x1",
+        "choices": "A: x1, B: x1, C: x1, D: x1",
         "answer": "x1",
         "explanation": "x1"
     }},
     {{
         "question": "x2",
+        "choices": "A: x2, B: x2, C: x2, D: x2",
         "answer": "x2",
         "explanation": "x2"
     }}
 ]
-```
+"""
+    return prompt.strip()
 
-Raw Text:
+def create_multiple_choice_prompt(raw_text, question_count):
+    """
+    Generate a prompt template for multiple-choice questions.
+    The example output uses generic fake values.
+    """
+    prompt = f"""
+You are provided with the following raw text:
+------------------------------
 {raw_text}
-'''
-    return prompt
+------------------------------
+Please analyze the text carefully and generate {question_count} multiple-choice questions.
+For each question, output the following keys in valid JSON:
+- "question": The question text.
+- "choices": The options in the format "A: option, B: option, C: option, D: option". There must be exactly four choices.
+- "answer": One or more letters representing the correct options (e.g., "x1, x1").
+- "explanation": A detailed and self-contained explanation that does not refer back to the provided text.
+
+Example:
+[
+    {{
+        "question": "x1",
+        "choices": "A: x1, B: x1, C: x1, D: x1",
+        "answer": "x1, x1",
+        "explanation": "x1"
+    }},
+    {{
+        "question": "x2",
+        "choices": "A: x2, B: x2, C: x2, D: x2",
+        "answer": "x2, x2",
+        "explanation": "x2"
+    }}
+]
+"""
+    return prompt.strip()
+
+def create_prompt(raw_text, question_type, question_count):
+    """
+    Chooses the correct prompt template based on the question type.
+    """
+    if question_type == "single-choice":
+        return create_single_choice_prompt(raw_text, question_count)
+    elif question_type == "multiple-choice":
+        return create_multiple_choice_prompt(raw_text, question_count)
+    else:
+        raise ValueError("Unsupported question type. Only 'single-choice' and 'multiple-choice' are supported.")
 
 def construct_prompt():
     """
-    Returns the system prompt with instructions to avoid referring to the original text.
+    Returns the system prompt with instructions not to refer back to the original text.
     """
     return (
         "You are an assistant specializing in generating educational questions. "
-        "For each question, provide a detailed explanation. The explanation should be self-contained, "
-        "concise, and not refer to the original text."
+        "For each question, provide a detailed explanation that is self-contained and does not refer back to the provided text."
     )
 
 def construct_type1_message(dataset_type, origin_dict, question_type):
     """
     Constructs the message structure for the LLM call.
-    
-    It converts the input JSON into a readable text and then determines the expected
-    number of questions based on the text length:
+    Converts the input JSON into a readable text and determines the expected number of questions:
       - If word count < 500, then generate 5 questions.
       - Otherwise, generate 10 questions.
-    
-    Returns both the messages (as a list of dicts) and the computed question count.
     """
     raw_text = transform_to_readable_text(origin_dict)
     word_count = len(raw_text.split())
-    if word_count < 500:
-        question_count = 5
-    else:
-        question_count = 10
+    question_count = 5 if word_count < 500 else 10
     
     input_text = create_prompt(raw_text=raw_text, question_type=question_type, question_count=question_count)
     s_prompt = construct_prompt()
@@ -166,15 +170,13 @@ def construct_type1_message(dataset_type, origin_dict, question_type):
     ]
     return messages, question_count
 
-
-import re
-
 def extract_json(text):
-    # Remove any leading/trailing whitespace
+    """
+    Attempt to extract a JSON block from the provided text.
+    """
     text = text.strip()
-    # Check if the text starts with [ or {, if not try to extract a JSON block
     if not (text.startswith('[') or text.startswith('{')):
-        # Attempt to extract JSON block using regex: find the first '[' and last ']'
+        # Attempt to extract the first JSON array block.
         start = text.find('[')
         end = text.rfind(']')
         if start != -1 and end != -1:
@@ -182,31 +184,37 @@ def extract_json(text):
     return text
 
 def split_generated_output(text, expected_count):
+    """
+    Parses the LLM output and verifies that it is valid JSON with the expected keys.
+    If JSON parsing fails, uses a regex fallback.
+    """
     try:
         json_text = extract_json(text)
         qa_pairs = json.loads(json_text)
         if (isinstance(qa_pairs, list) and
-            all(isinstance(item, dict) and {"question", "answer", "explanation"} <= set(item.keys()) 
+            all(isinstance(item, dict) and {"question", "choices", "answer", "explanation"} <= set(item.keys())
                 for item in qa_pairs)):
             if len(qa_pairs) >= expected_count:
                 return qa_pairs
     except Exception as e:
         print("JSON parsing error:", e)
-        # Proceed with regex fallback below if JSON parsing fails
+        # Fallback if JSON parsing fails.
         pass
 
-    # Fallback: Use regex to capture blocks that start with "Question:", "Answer:", and "Explanation:".
+    # Fallback using regex.
     pattern = (
         r"Question\s*\d*:\s*(?P<question>.+?)\s*"
+        r"Choices\s*\d*:\s*(?P<choices>.+?)\s*"
         r"Answer\s*\d*:\s*(?P<answer>.+?)\s*"
         r"Explanation\s*\d*:\s*(?P<explanation>.+?)(?=(?:Question\s*\d*:)|$)"
     )
     matches = re.findall(pattern, text, flags=re.DOTALL)
     results = []
     for match in matches:
-        q, a, exp = match
+        q, c, a, exp = match
         results.append({
             "question": q.strip(),
+            "choices": c.strip(),
             "answer": a.strip(),
             "explanation": exp.strip()
         })
@@ -215,11 +223,8 @@ def split_generated_output(text, expected_count):
 def get_validated_completion(api_base, model_name, messages, expected_count, max_tokens=4096, temperature=0.7, max_retries=5):
     """
     Calls the chat_completion API and verifies that the returned text contains
-    at least the expected number of QA pairs.
-    
-    If the number of parsed QA pairs is insufficient, the function retries up to
-    max_retries times. If after the retries the output still does not meet the
-    expected count, it returns whatever was generated (with a warning) or raises an error.
+    at least the expected number of question objects.
+    Retries if necessary.
     """
     retries = 0
     while retries < max_retries:
@@ -231,9 +236,12 @@ def get_validated_completion(api_base, model_name, messages, expected_count, max
         else:
             retries += 1
             logger.warning(f"Insufficient QA pairs generated ({len(qa_pairs)}/{expected_count}). Retrying {retries}/{max_retries}...")
-            logger.warning(json.loads(response_text))
+            try:
+                logger.warning(json.loads(response_text))
+            except Exception:
+                logger.warning(response_text)
     if qa_pairs:
-        logger.warning(f"Returning {len(qa_pairs)} QA pairs after {max_retries} retries, which is less than the expected {expected_count}.")
+        logger.warning(f"Returning {len(qa_pairs)} QA pairs after {max_retries} retries, which is less than expected.")
         return qa_pairs
     else:
         raise Exception("Failed to generate sufficient QA pairs after maximum retries.")
@@ -250,10 +258,13 @@ def process_record(record, q_type, api_base, model_name, dataset_type):
             origin_dict=origin_dict,
             question_type=q_type
         )
-        logger.info(f"[INFO] Processing record {idx} for type '{q_type}' with expected {question_count} QA pairs...")
+        logger.info(f"[INFO] Processing record {idx} for type '{q_type}' with expected {question_count} questions...")
         qa_result = get_validated_completion(
             api_base, model_name, messages,
-            expected_count=question_count, max_tokens=8096 if question_count >5 else 4096, temperature=0.7, max_retries=50
+            expected_count=question_count,
+            max_tokens=8096 if question_count > 5 else 4096,
+            temperature=0.7,
+            max_retries=50
         )
     except Exception as e:
         qa_result = f"[Error calling LLM] {str(e)}"
@@ -276,54 +287,37 @@ def main():
         "--question_type",
         type=str,
         default="single-choice",
-        choices=[
-            "all",
-            "single-choice",
-            "multiple-choice",
-            "fill-in-the-blank",
-            "judgment",
-            "short-answer"
-        ],
-        help="Type of questions to generate. Use 'all' to generate for all types."
+        choices=["all", "single-choice", "multiple-choice"],
+        help="Type of questions to generate. Use 'all' to generate both single-choice and multiple-choice questions."
     )
-    parser.add_argument(
-        "--question_count",
-        type=int,
-        default=5,
-        help="Default number of questions to generate if not determined by text length."
-    )
-    
-    parser.add_argument("--host_vllm", default=False)
+    parser.add_argument("--host_vllm", action="store_true", help="Flag to host the vLLM server.")
     args = parser.parse_args()
     
-    # Check if the output folder exists; if not, create it.
+    # Ensure output folder exists.
     if not os.path.exists(args.output_folder_path):
         os.makedirs(args.output_folder_path)
     
-    # Define the list of question types to process.
+    # Determine which types to process.
     if args.question_type == "all":
-        types_to_generate = ["single-choice", "multiple-choice", "fill-in-the-blank", "judgment", "short-answer"]
+        types_to_generate = ["single-choice", "multiple-choice"]
     else:
         types_to_generate = [args.question_type]
     
-    # Read input data.
     data_list = list(read_jsonl(args.input_jsonl))
-    
     api_base = f"http://localhost:{args.port}/v1"
     
-    # Start vLLM server for the chosen model.
+    # Optionally start the vLLM server.
     if args.host_vllm:
         process = start_vllm_server(args.model, args.model_name, args.port, args.gpu)
     
-    # Process for each question type separately.
+    # Process each question type separately.
     for q_type in types_to_generate:
-        # Create an output filename with the question type appended.
         input_basename = os.path.basename(args.input_jsonl).replace(".jsonl", "")
         output_file = os.path.join(args.output_folder_path, f'type1_{input_basename}_{q_type}.jsonl')
         
-        # Load existing results (if any) to avoid reprocessing records.
+        # Load existing results to avoid duplicate processing.
         if os.path.exists(output_file):
-            logger.info(f"[INFO] Loading existing results from {output_file} for type '{q_type}'")
+            logger.info(f"[INFO] Loading existing results from {output_file} for type '{q_type}'.")
             existing_results = list(read_jsonl(output_file))
             existing_ids = {record["idx"] for record in existing_results}
             records_to_process = [record for record in data_list if record.get("idx") not in existing_ids]
@@ -333,7 +327,6 @@ def main():
             records_to_process = data_list[:]
         
         output_data = []
-        
         def save_partial_results():
             if output_data:
                 write_jsonl(output_file, output_data, append=True)
@@ -345,18 +338,15 @@ def main():
             pre_time = time.time()
             for i, future in enumerate(futures, start=1):
                 output_data.append(future.result())
-                # Save intermediate results every 2000 records.
                 if i % 200 == 0:
                     current_time = time.time()
                     save_partial_results()
                     logger.info(f"[INFO] Processed {i} records for type '{q_type}' in {current_time - pre_time:.2f}s.")
                     pre_time = current_time
         
-        # Save any remaining records for the current question type.
         save_partial_results()
         logger.info(f"[INFO] Output saved to {output_file} for type '{q_type}'.")
     
-    # Stop the vLLM server.
     if args.host_vllm:
         stop_vllm_server(process)
 
