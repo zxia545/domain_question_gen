@@ -75,22 +75,22 @@ Please analyze the text carefully and generate {question_count} single-choice qu
 For each question, output the following keys in valid JSON:
 - "question": The question text.
 - "choices": The options in the format "A: option, B: option, C: option, D: option". There must be exactly four choices.
-- "answer": A single letter representing the correct option (e.g., "x1").
+- "answer": A single letter representing the correct option (e.g., "A").
 - "explanation": A detailed and self-contained explanation that does not refer back to the provided text.
 
 Example:
 [
     {{
         "question": "x1",
-        "choices": "A: x1, B: x1, C: x1, D: x1",
-        "answer": "x1",
-        "explanation": "x1"
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
+        "answer": "A",
+        "explanation": "A is correct because option_1 ......"
     }},
     {{
         "question": "x2",
-        "choices": "A: x2, B: x2, C: x2, D: x2",
-        "answer": "x2",
-        "explanation": "x2"
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
+        "answer": "B",
+        "explanation": "B is correct because option_2 ......"
     }}
 ]
 """
@@ -110,22 +110,22 @@ Please analyze the text carefully and generate {question_count} multiple-choice 
 For each question, output the following keys in valid JSON:
 - "question": The question text.
 - "choices": The options in the format "A: option, B: option, C: option, D: option". There must be exactly four choices.
-- "answer": One or more letters representing the correct options (e.g., "x1, x1").
+- "answer": One or more letters representing the correct options (e.g., "A, B").
 - "explanation": A detailed and self-contained explanation that does not refer back to the provided text.
 
 Example:
 [
     {{
         "question": "x1",
-        "choices": "A: x1, B: x1, C: x1, D: x1",
-        "answer": "x1, x1",
-        "explanation": "x1"
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
+        "answer": "A, B",
+        "explanation": "A, B are correct because option_1 and option_2 ......"
     }},
     {{
         "question": "x2",
-        "choices": "A: x2, B: x2, C: x2, D: x2",
-        "answer": "x2, x2",
-        "explanation": "x2"
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
+        "answer": "A, C",
+        "explanation": "A, C are correct because option_1 and option_3 ......"
     }}
 ]
 """
