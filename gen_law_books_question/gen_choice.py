@@ -100,6 +100,8 @@ def create_multiple_choice_prompt(raw_text, question_count):
     """
     Generate a prompt template for multiple-choice questions.
     The example output uses generic fake values.
+    Note: This version instructs the model to generate more than four choices
+    (e.g., at least five options) and to ensure that the correct answer includes more than two options.
     """
     prompt = f"""
 You are provided with the following raw text:
@@ -109,27 +111,28 @@ You are provided with the following raw text:
 Please analyze the text carefully and generate {question_count} multiple-choice questions.
 For each question, output the following keys in valid JSON:
 - "question": The question text.
-- "choices": The options in the format "A: option, B: option, C: option, D: option". There must be exactly four choices.
-- "answer": One or more letters representing the correct options (e.g., "A, B").
+- "choices": The options in the format "A: option, B: option, C: option, D: option, E: option, ..." There must be more than four choices.
+- "answer": Two or more letters representing the correct options (e.g., "A, C"). The answer must include more than two correct choices.
 - "explanation": A detailed and self-contained explanation that does not refer back to the provided text.
 
 Example:
 [
     {{
         "question": "x1",
-        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
-        "answer": "A, B",
-        "explanation": "A, B are correct because option_1 and option_2 ......"
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4, E: option_5",
+        "answer": "A, B, C",
+        "explanation": "A, B, and C are correct because option_1, option_2, and option_3 ......"
     }},
     {{
         "question": "x2",
-        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
-        "answer": "A, C",
-        "explanation": "A, C are correct because option_1 and option_3 ......"
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4, E: option_5, F: option_6",
+        "answer": "A, C, E",
+        "explanation": "A, C, and E are correct because option_1, option_3, and option_5 ......"
     }}
 ]
 """
     return prompt.strip()
+
 
 def create_prompt(raw_text, question_type, question_count):
     """
