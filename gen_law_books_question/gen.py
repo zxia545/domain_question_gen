@@ -101,6 +101,8 @@ For each question, provide:
 1. The Question
 2. The Correct Answer
 3. A Detailed Explanation of this Answer.
+
+Ensure that your explanation provides a detailed elaboration.
 The explanation should not refer to the raw text or mention "the text says" or "based on the given text".
 It should be a self-contained explanation that provides general knowledge or reasoning for why the answer is correct.
 
@@ -302,7 +304,7 @@ def main():
     
     # Define the list of question types to process.
     if args.question_type == "all":
-        types_to_generate = ["single-choice", "multiple-choice", "fill-in-the-blank", "judgment", "short-answer"]
+        types_to_generate = ["fill-in-the-blank", "judgment", "short-answer"]
     else:
         types_to_generate = [args.question_type]
     

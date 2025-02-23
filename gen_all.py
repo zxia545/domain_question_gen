@@ -12,7 +12,7 @@ import re
 # Configure logger
 logging.basicConfig(
     level=logging.INFO,
-    filename=f'gen_other_running_{time.strftime("%d_%H_%M_%S")}.log',
+    filename=f'gen_all_running_{time.strftime("%d_%H_%M_%S")}.log',
     filemode='a',
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
@@ -54,9 +54,80 @@ def split_text_into_sections(text, max_words=500):
     logger.info(f"Split text into {len(sections)} sections.")
     return sections
 
-#############################################
-# UPDATED: Revised create_prompt function
-#############################################
+
+def create_single_choice_prompt(raw_text, question_count):
+    """
+    Generate a prompt template for single-choice questions.
+    The example output uses generic fake values.
+    """
+    prompt = f"""
+You are provided with the following raw text:
+------------------------------
+{raw_text}
+------------------------------
+Please analyze the text carefully and generate {question_count} single-choice questions.
+For each question, output the following keys in valid JSON:
+- "question": The question text.
+- "choices": The options in the format "A: option, B: option, C: option, D: option". There must be exactly four choices.
+- "answer": A single letter representing the correct option (e.g., "A").
+- "explanation": A detailed and self-contained explanation that does not refer back to the provided text.
+
+Example:
+[
+    {{
+        "question": "x1",
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
+        "answer": "A",
+        "explanation": "A is correct because option_1 ......"
+    }},
+    {{
+        "question": "x2",
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4",
+        "answer": "B",
+        "explanation": "B is correct because option_2 ......"
+    }}
+]
+"""
+    return prompt.strip()
+
+def create_multiple_choice_prompt(raw_text, question_count):
+    """
+    Generate a prompt template for multiple-choice questions.
+    The example output uses generic fake values.
+    Note: This version instructs the model to generate more than four choices
+    (e.g., at least five options) and to ensure that the correct answer includes more than two options.
+    """
+    prompt = f"""
+You are provided with the following raw text:
+------------------------------
+{raw_text}
+------------------------------
+Please analyze the text carefully and generate {question_count} multiple-choice questions.
+For each question, output the following keys in valid JSON:
+- "question": The question text.
+- "choices": The options in the format "A: option, B: option, C: option, D: option, E: option, ..." There must be more than four choices.
+- "answer": Two or more letters representing the correct options (e.g., "A, C"). The answer must include more than two correct choices.
+- "explanation": A detailed and self-contained explanation that does not refer back to the provided text.
+
+Example:
+[
+    {{
+        "question": "x1",
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4, E: option_5",
+        "answer": "A, B, C",
+        "explanation": "A, B, and C are correct because option_1, option_2, and option_3 ......"
+    }},
+    {{
+        "question": "x2",
+        "choices": "A: option_1, B: option_2, C: option_3, D: option_4, E: option_5, F: option_6",
+        "answer": "A, C, E",
+        "explanation": "A, C, and E are correct because option_1, option_3, and option_5 ......"
+    }}
+]
+"""
+    return prompt.strip()
+
+
 def create_prompt(raw_text, question_type, question_count=5):
     """
     Build the GPT-4 prompt based on the text section and question type.
@@ -77,8 +148,6 @@ def create_prompt(raw_text, question_type, question_count=5):
     """
     # Map internal type to a user-friendly name.
     type_mapping = {
-        "single-choice": "Single Choice (SC)",
-        "multiple-choice": "Multiple Choice (MC)",
         "fill-in-the-blank": "Fill in the Blank (FB)",
         "judgment": "Judgment (True/False) (J)",
         "short-answer": "Short Answer (SA)"
@@ -125,14 +194,19 @@ Raw Text:
     return prompt
 
 
-
 def construct_type1_message_for_txt(section_text, question_type):
     """
     Constructs the message structure for a given text section.
     Always generates a fixed number (5) of questions per section.
+    For "single-choice" and "multiple-choice" question types, use the specialized prompt format.
     """
     question_count = 5
-    input_text = create_prompt(raw_text=section_text, question_type=question_type, question_count=question_count)
+    if question_type == "single-choice":
+        input_text = create_single_choice_prompt(section_text, question_count)
+    elif question_type == "multiple-choice":
+        input_text = create_multiple_choice_prompt(section_text, question_count)
+    else:
+        input_text = create_prompt(raw_text=section_text, question_type=question_type, question_count=question_count)
     s_prompt = (
         "You are an assistant specializing in generating educational questions. "
         "For each question, provide a detailed, self-contained explanation without referring back to the original section."
@@ -143,9 +217,7 @@ def construct_type1_message_for_txt(section_text, question_type):
     ]
     return messages, question_count
 
-#############################################
-# Adjusted processing for text input
-#############################################
+
 def process_text_section(section_text, q_type, api_base, model_name):
     """
     Process a single text section for a given question type.
@@ -159,7 +231,7 @@ def process_text_section(section_text, q_type, api_base, model_name):
         qa_result = get_validated_completion(
             api_base, model_name, messages,
             expected_count=question_count, 
-            max_tokens=4096, temperature=0.7, max_retries=50
+            max_tokens=4096, temperature=0.7, max_retries=20
         )
     except Exception as e:
         qa_result = f"[Error calling LLM] {str(e)}"
@@ -168,8 +240,10 @@ def process_text_section(section_text, q_type, api_base, model_name):
     logger.info(f"Completed processing text section for type '{q_type}'.")
     return {"qa": qa_result, "input": messages[1]["content"]}
 
-import re
 
+#############################################
+# Utility functions to extract and split generated output
+#############################################
 def extract_json(text):
     # Remove any leading/trailing whitespace
     text = text.strip()
@@ -183,11 +257,22 @@ def extract_json(text):
     return text
 
 def split_generated_output(text, expected_count):
+    """
+    Parses the LLM output and verifies that it is valid JSON with the expected keys.
+    For single-choice and multiple-choice, the expected keys are:
+       "question", "choices", "answer", "explanation"
+    For other question types, the expected keys are:
+       "question", "answer", "explanation"
+    A regex fallback is used if JSON parsing fails.
+    """
+    valid_keys_3 = {"question", "answer", "explanation"}
+    valid_keys_4 = {"question", "choices", "answer", "explanation"}
     try:
         json_text = extract_json(text)
         qa_pairs = json.loads(json_text)
         if (isinstance(qa_pairs, list) and
-            all(isinstance(item, dict) and {"question", "answer", "explanation"} <= set(item.keys()) 
+            all(isinstance(item, dict) and 
+                (valid_keys_3 <= set(item.keys()) or valid_keys_4 <= set(item.keys()))
                 for item in qa_pairs)):
             if len(qa_pairs) >= expected_count:
                 return qa_pairs
@@ -196,22 +281,43 @@ def split_generated_output(text, expected_count):
         # Proceed with regex fallback below if JSON parsing fails
         pass
 
-    # Fallback: Use regex to capture blocks that start with "Question:", "Answer:", and "Explanation:".
-    pattern = (
-        r"Question\s*\d*:\s*(?P<question>.+?)\s*"
-        r"Answer\s*\d*:\s*(?P<answer>.+?)\s*"
-        r"Explanation\s*\d*:\s*(?P<explanation>.+?)(?=(?:Question\s*\d*:)|$)"
-    )
-    matches = re.findall(pattern, text, flags=re.DOTALL)
-    results = []
-    for match in matches:
-        q, a, exp = match
-        results.append({
-            "question": q.strip(),
-            "answer": a.strip(),
-            "explanation": exp.strip()
-        })
-    return results
+    # Fallback using regex.
+    if valid_keys_4 <= set(text):
+        # Fallback for single/multiple choice format
+        pattern = (
+            r"Question\s*\d*:\s*(?P<question>.+?)\s*"
+            r"Choices\s*\d*:\s*(?P<choices>.+?)\s*"
+            r"Answer\s*\d*:\s*(?P<answer>.+?)\s*"
+            r"Explanation\s*\d*:\s*(?P<explanation>.+?)(?=(?:Question\s*\d*:)|$)"
+        )
+        matches = re.findall(pattern, text, flags=re.DOTALL)
+        results = []
+        for match in matches:
+            q, c, a, exp = match
+            results.append({
+                "question": q.strip(),
+                "choices": c.strip(),
+                "answer": a.strip(),
+                "explanation": exp.strip()
+            })
+        return results
+    else:
+        # Fallback for default 3-key format
+        pattern = (
+            r"Question\s*\d*:\s*(?P<question>.+?)\s*"
+            r"Answer\s*\d*:\s*(?P<answer>.+?)\s*"
+            r"Explanation\s*\d*:\s*(?P<explanation>.+?)(?=(?:Question\s*\d*:)|$)"
+        )
+        matches = re.findall(pattern, text, flags=re.DOTALL)
+        results = []
+        for match in matches:
+            q, a, exp = match
+            results.append({
+                "question": q.strip(),
+                "answer": a.strip(),
+                "explanation": exp.strip()
+            })
+        return results
 
 def get_validated_completion(api_base, model_name, messages, expected_count, max_tokens=4096, temperature=0.7, max_retries=5):
     """
@@ -232,7 +338,10 @@ def get_validated_completion(api_base, model_name, messages, expected_count, max
         else:
             retries += 1
             logger.warning(f"Insufficient QA pairs generated ({len(qa_pairs)}/{expected_count}). Retrying {retries}/{max_retries}...")
-            logger.warning(json.loads(response_text))
+            try:
+                logger.warning(json.loads(response_text))
+            except Exception:
+                logger.warning(response_text)
     if qa_pairs:
         logger.warning(f"Returning {len(qa_pairs)} QA pairs after {max_retries} retries, which is less than the expected {expected_count}.")
         return qa_pairs
@@ -261,7 +370,7 @@ def main():
             "judgment",
             "short-answer"
         ],
-        help="Type of questions to generate. Use 'all' to generate for all types."
+        help="Type of questions to generate. Use 'all' to generate for all types (except single/multiple-choice, which are handled separately)."
     )
     parser.add_argument("--host_vllm")
     args = parser.parse_args()
@@ -271,7 +380,7 @@ def main():
         os.makedirs(args.output_folder_path)
 
     # Read the entire text from the input file.
-    with open(args.input_file, "r") as f:
+    with open(args.input_file, "r", encoding="utf-8") as f:
         full_text = f.read()
 
     # Split the text into sections of approximately 500 words.
@@ -279,9 +388,11 @@ def main():
 
     # Define the list of question types to process.
     if args.question_type == "all":
-        types_to_generate = ["fill-in-the-blank", "judgment", "short-answer"]
+        # For demonstration, here "all" applies to types other than single- and multiple-choice.
+        types_to_generate = ["fill-in-the-blank", "judgment", "short-answer", "single-choice", "multiple-choice"]
     else:
         types_to_generate = [args.question_type]
+
 
     api_base = f"http://localhost:{args.port}/v1"
 
@@ -294,7 +405,7 @@ def main():
         output_file = os.path.join(args.output_folder_path, f'text_sections_{q_type}.jsonl')
         output_data = []
 
-        # Process each text section.
+        # Process each text section concurrently.
         with ThreadPoolExecutor(max_workers=args.threads) as executor:
             futures = [
                 executor.submit(process_text_section, section, q_type, api_base, args.model_name)
